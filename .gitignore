@@ -1,0 +1,38 @@
+# --- secrets ---
+kaggle.json
+*.env
+.env
+
+# --- environments ---
+venv/
+.venv/
+env/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# --- data (download from Kaggle; licences do not allow redistribution) ---
+data/dataset1/
+data/dataset2/
+augmented_data/
+# keep the split files: they define the exact folds used in the paper
+!data/splits/
+
+# --- training outputs ---
+results/runs/*/fold*/best.pt
+results/runs/*/fold*/last.pt
+results/runs/yolo_*/train/weights/
+results/_smoke/
+*.pt
+*.pth
+*.onnx
+yolov8*.pt
+
+# --- reference paper (copyrighted PDF; cite it instead) ---
+*.pdf
+
+# --- OS / IDE ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

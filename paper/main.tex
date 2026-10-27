@@ -1,0 +1,260 @@
+% =====================================================================
+% KidneyMTL - manuscript draft
+% Numbers marked \todo{} are produced by scripts/aggregate_results.py etc.
+% (see README "Analyse"). Tables are \input directly from results/tables/.
+% Before submission: switch to the target journal's template, verify every
+% reference, fill every \todo{}, and remove this header.
+% =====================================================================
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,booktabs,graphicx,hyperref,xcolor,multirow}
+\usepackage[numbers,sort&compress]{natbib}
+\newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
+\graphicspath{{../results/figures/}{../results/explain/}{figures/}}
+
+\title{Beyond Leaky Benchmarks: Leakage-Aware Multi-Task Learning for\\
+Kidney Disease Classification and Stone Localisation in CT}
+\author{Utkarsh Kumar\thanks{\todo{affiliation, e-mail}}}
+\date{}
+
+\begin{document}
+\maketitle
+
+% ---------------------------------------------------------------------
+\begin{abstract}
+Deep-learning studies on public kidney CT datasets routinely report accuracies above 99\%. We show that a
+large part of this performance is produced by the evaluation protocol rather than by the models. On the
+widely used CT-KIDNEY dataset (12,446 slices; normal, cyst, tumour, stone), 99.3\% of test images in a random
+image-level split have a near-duplicate (perceptual-hash distance $\le$4/64 bits) in the training set, the
+dataset contains 517 sets of byte-identical files, and the common practice of augmenting before splitting
+places transformed copies of 98.6\% of test images in the training data. We propose (i)~a leakage-aware
+evaluation protocol that groups near-duplicate slices and performs stratified group 5-fold cross-validation,
+and (ii)~KidneyMTL, a multi-task network whose shared EfficientNet-B3 backbone is trained jointly for
+four-class kidney disease classification and kidney-stone localisation on two partially labelled datasets,
+with a CBAM classification head, an anchor-free CenterNet detection head and uncertainty-based task weighting.
+Under the leakage-free protocol KidneyMTL reaches a macro-F1 of \todo{XX.X $\pm$ X.X}\% and a stone
+detection mAP@0.5 of \todo{XX.X}\%, outperforming \todo{N} ImageNet baselines and a re-implementation of the
+recent CDR-VGG19 model (\todo{XX.X}\%; McNemar $p<$\todo{}). Re-training the same models under the random and
+augment-then-split protocols inflates macro-F1 by up to \todo{XX} points, which explains the near-perfect
+results reported previously. Code, folds and all trained configurations are publicly available.
+\end{abstract}
+
+\noindent\textbf{Keywords:} kidney stone; CT; multi-task learning; data leakage; object detection;
+explainable AI; calibration
+
+% ---------------------------------------------------------------------
+\section{Introduction}
+Kidney stone disease affects a large and increasing share of the population, and non-contrast CT is the
+reference imaging modality for its diagnosis. Cysts and renal tumours appear on the same scans, so an
+automated reader should both separate these conditions and, for stones, show \emph{where} the stone is.
+Most recent deep-learning studies frame the problem as image-level classification on public Kaggle datasets
+and report accuracies between 98\% and 99.9\%~\citep{islam2022vision,devi2025cdr,yildirim2021deep}.
+
+Two methodological issues make these numbers hard to interpret. First, the public CT-KIDNEY dataset
+\citep{islam2022vision} has no patient identifiers and consists of consecutive, highly similar slices from the
+same patients, so a random image-level split places near-copies of each test image in the training set.
+Second, several studies augment the dataset (e.g., 21 variants per image in~\citep{devi2025cdr}) \emph{before}
+splitting it, so rotated or flipped versions of the same image appear in both training and test data. Both are
+instances of the leakage problems that have been identified as a major cause of irreproducible results in
+machine-learning-based science and medical imaging~\citep{kapoor2023leakage,roberts2021pitfalls,varoquaux2022failures}.
+
+A second limitation is that almost all prior models output only a class label. A detector that localises the
+stone is more useful clinically and gives a direct check on whether the classifier relies on the lesion.
+Kidney stone datasets with box annotations are, however, small and contain no non-stone classes, while large
+classification datasets contain no boxes.
+
+This paper addresses both points. Our contributions are:
+\begin{enumerate}
+  \item A \textbf{leakage audit} of CT-KIDNEY based on perceptual hashing, and a \textbf{grouped, stratified
+  5-fold protocol} that keeps every group of near-duplicate slices inside a single fold (Section~\ref{sec:protocol}).
+  \item A \textbf{controlled leakage experiment} that re-trains identical models under three protocols
+  (grouped, random, augment-then-split) and quantifies how much each protocol inflates reported performance
+  (Section~\ref{sec:leakage}).
+  \item \textbf{KidneyMTL}, a multi-task network trained on two \emph{partially labelled} datasets: four-class
+  classification from CT-KIDNEY and stone localisation from a box-annotated stone dataset. It uses CBAM
+  attention, a CenterNet head on an FPN neck, and homoscedastic-uncertainty task weighting (Section~\ref{sec:method}).
+  \item A \textbf{tri-channel input} $[\,\text{CT},\ \text{CLAHE(CT)},\ \text{contour map}\,]$ that keeps the
+  contour prior of~\citep{devi2025cdr} without discarding intensity information.
+  \item A \textbf{complete evaluation}: seven baselines including a re-implementation of
+  CDR-VGG19~\citep{devi2025cdr}, twelve ablations, paired significance tests, calibration analysis,
+  quantitative explainability, an external cross-dataset test and an efficiency analysis.
+\end{enumerate}
+
+% ---------------------------------------------------------------------
+\section{Related work}
+\paragraph{Kidney stone and kidney disease classification.}
+CNN classifiers for kidney stones on coronal CT include sequential CNNs~\citep{yildirim2021deep} and ensembles;
+\citet{islam2022vision} released CT-KIDNEY and compared vision transformers with CNNs (Swin reaching
+99.3\% accuracy under a random split). \citet{devi2025cdr} combine a contour-detected input with a VGG-19
+backbone and a normalised residual block (CDR-VGG19), reporting 99.61\% accuracy after 21$\times$
+augmentation followed by an 80:10:10 split. \todo{add 3--5 recent papers on CT-KIDNEY and report their split
+protocol; most use random splits}.
+
+\paragraph{Stone detection and segmentation.}
+\citet{elton2022deep} detect and segment stones on non-contrast CT with a 3D U-Net and \citet{parakh2019urinary}
+evaluate stone detection and generalisation across scanners. \todo{add YOLO-based stone detectors}.
+
+\paragraph{Multi-task learning.}
+Sharing a representation across related tasks can improve generalisation~\citep{caruana1997multitask}.
+\citet{kendall2018multi} weight task losses by learned homoscedastic uncertainty, which we adopt to balance
+classification and detection without manual tuning.
+
+\paragraph{Leakage and evaluation in medical imaging.}
+\citet{roberts2021pitfalls} found that most COVID-19 imaging models were not fit for clinical use, partly
+because of duplicated and overlapping data. \citet{kapoor2023leakage} catalogue leakage types across
+disciplines, and \citet{varoquaux2022failures} discuss evaluation failures specific to medical imaging.
+Reporting guidelines such as CLAIM~\citep{mongan2020claim} require patient-level separation of data subsets.
+
+% ---------------------------------------------------------------------
+\section{Datasets and evaluation protocol}\label{sec:protocol}
+\paragraph{CT-KIDNEY (classification).} 12,446 axial CT slices (JPEG) labelled Normal (5,077), Cyst (3,709),
+Tumor (2,283) and Stone (1,377)~\citep{islam2022vision}. No patient identifiers are provided.
+
+\paragraph{Kidney-stone boxes (detection).} 1,300 coronal CT images with \todo{N} stone bounding boxes
+(Roboflow export of the Kaggle ``kidney stone images'' dataset, CC~BY~4.0), split by its authors into
+1,054/123/123 train/validation/test images. Roboflow created two augmented versions of each source image. We
+verified that no source image appears in more than one split.
+
+\paragraph{Leakage audit.} We compute a 64-bit DCT perceptual hash~\citep{zauner2010phash} of every CT-KIDNEY
+slice and link slices whose Hamming distance is $\le\tau$. Connected components form \emph{groups}. Table~\ref{tab:audit}
+summarises the audit. With $\tau{=}4$ the data form 229 groups (largest: 705 slices). Larger thresholds merge
+almost half of the dataset into a single component through transitive chaining ($\tau{=}6$: 5,664 slices), so we
+use $\tau{=}4$, the strictest threshold that still yields usable folds. In addition, 517 sets of byte-identical
+files (1,034 images) exist.
+
+\begin{table}[t]\centering
+\caption{Near-duplicate audit of CT-KIDNEY (mean over 5 folds). ``NN'' = nearest training image of each test image.}
+\label{tab:audit}
+\begin{tabular}{lcc}\toprule
+Protocol & Test images with NN $\le$4 bits & Median NN distance (bits) \\\midrule
+Random image split & 99.3\% & 0.0 \\
+Augment-then-split~\citep{devi2025cdr} & 98.6\%$^\dagger$ & -- \\
+Grouped (ours) & 0.0\% & 10.4 \\\bottomrule
+\multicolumn{3}{l}{\footnotesize $^\dagger$ test source images whose augmented copies are in the training set.}
+\end{tabular}
+\end{table}
+
+\paragraph{Protocol.} Groups are distributed over five parts with StratifiedGroupKFold. In fold $k$, part $k$ is
+the test set, part $(k{+}1)\bmod 5$ the validation set (model selection and early stopping) and the remaining three
+parts the training set (60/20/20). Every image is therefore tested exactly once, which yields out-of-fold
+predictions for the whole dataset. Augmentation is applied online and to training images only. For the leakage
+experiment we also build (a) a stratified \emph{random} image-level 5-fold split and (b) the \emph{augment-then-split}
+protocol of~\citep{devi2025cdr}: every image is expanded into five deterministic variants (rotations, flips,
+intensity changes, noise, zoom) and the variants are split at random.
+
+\paragraph{Limitation of the proxy.} Hash groups approximate but do not equal patients. Two different patients
+may fall in one group (14 of 229 groups contain more than one class), and distant slices of the same patient may
+fall in different groups. The grouped protocol is therefore a strict lower bound on leakage, not a guarantee of
+patient-level independence.
+
+% ---------------------------------------------------------------------
+\section{Method}\label{sec:method}
+\todo{Figure 1: architecture diagram (backbone, CBAM head, FPN, CenterNet head, two data streams).}
+
+\paragraph{Input representation.} Each grey-level slice $g$ is mapped to three channels
+$[\,g,\ \mathrm{CLAHE}(g),\ K(g)\,]$, where $K(g)$ is a multi-level iso-intensity contour map: after Gaussian
+smoothing, contours are traced at the Otsu threshold and at the 85th, 95th and 99th intensity percentiles of the
+foreground and drawn with level-dependent intensity. Hyper-dense structures such as stones therefore receive
+nested high-level contours. Unlike~\citep{devi2025cdr}, the contour map is added to the image, not substituted
+for it, so an ImageNet-pretrained backbone can use all three views.
+
+\paragraph{Backbone and classification head.} An ImageNet-pretrained EfficientNet-B3~\citep{tan2019efficientnet}
+provides feature maps at strides 4, 8, 16 and 32. The stride-32 map passes through CBAM~\citep{woo2018cbam},
+global average pooling, dropout, a 256-unit layer with SiLU, and a linear layer with four outputs.
+
+\paragraph{Detection head.} A top-down FPN fuses the four feature levels into a 128-channel stride-4 map,
+followed by a CenterNet head~\citep{zhou2019objects} that predicts a stone-centre heatmap, the box size and a
+sub-pixel offset. Training targets are Gaussian peaks with the CenterNet radius. Boxes are decoded by
+$3{\times}3$ max-pooling non-maximum suppression and the top-50 peaks.
+
+\paragraph{Losses.} The classification loss is the focal loss~\citep{lin2017focal} ($\gamma{=}2$) with
+inverse-square-root class weights and label smoothing 0.05. The detection loss is
+$\mathcal{L}_{det}=\mathcal{L}_{hm}+\mathcal{L}_{off}+2\,\mathcal{L}_{CIoU}$ with the penalty-reduced focal
+heatmap loss, an $L_1$ offset loss and the CIoU loss~\citep{zheng2020diou} on boxes decoded at ground-truth centres.
+The tasks are combined with learned homoscedastic uncertainty~\citep{kendall2018multi}:
+$\mathcal{L}=e^{-s_c}\mathcal{L}_{cls}+s_c+e^{-s_d}\mathcal{L}_{det}+s_d$.
+
+\paragraph{Partially labelled training.} Each optimisation step draws one CT-KIDNEY batch (classification loss
+only) and one stone batch (detection loss only) and updates the shared backbone with the combined loss.
+No image needs both kinds of label.
+
+\paragraph{Implementation.} AdamW (backbone LR $2{\times}10^{-4}$, heads $10^{-3}$, weight decay $10^{-4}$),
+2-epoch linear warm-up and cosine decay, at most 40 epochs, early stopping on validation macro-F1 (patience 8),
+mixed precision, gradient clipping at 5, and an exponential moving average of the weights (decay 0.999) used for
+evaluation. Inputs are $320^2$ (classification) and $512^2$ letterboxed (detection). Training augmentation:
+horizontal flip, affine ($\pm15^\circ$, $\pm15\%$ scale, $\pm6\%$ shift), brightness/contrast, gamma, Gaussian
+noise, blur and coarse dropout. Test-time augmentation: horizontal-flip averaging. Hardware: \todo{GPU};
+software versions: \todo{torch, timm}. All hyperparameters are listed in \texttt{configs/default.yaml}.
+
+\paragraph{Baselines.} ResNet-50, DenseNet-121, EfficientNet-B3, ConvNeXt-T, ViT-S/16 and VGG-19-BN, fine-tuned
+from ImageNet with cross-entropy and the same augmentation, schedule and protocol. CDR-VGG19~\citep{devi2025cdr}
+is re-implemented from the paper's description (VGG-19, two 4096-unit FC layers, a 4096-320-320-4096 normalised
+residual block, contour-detected $224^2$ input; 146M parameters, matching the reported size).
+
+\paragraph{Metrics and statistics.} Accuracy, balanced accuracy, macro precision/recall/F1, macro one-vs-rest AUC,
+Cohen's $\kappa$, MCC, stone-vs-rest sensitivity and specificity, expected calibration error
+(15 bins)~\citep{guo2017calibration} and Brier score. We report the mean $\pm$ standard deviation over test folds
+and, on the pooled out-of-fold predictions, 95\% percentile bootstrap confidence intervals. The bootstrap
+resamples whole near-duplicate groups (2,000 replicates), so correlated slices are not counted as independent
+evidence. Models are compared with exact McNemar tests on paired predictions, with Holm correction within each
+table. Detection is evaluated with COCO-style AP at IoU 0.5 and 0.5:0.95 (101-point interpolation), together
+with precision, recall and F1 at a score threshold of 0.3.
+
+% ---------------------------------------------------------------------
+\section{Results}
+\subsection{Comparison with baselines}
+Table~\ref{tab:main} \todo{describe: best model, margin over strongest baseline and over CDR-VGG19, per-class
+behaviour (stone vs tumour confusion), significance from Table~\ref{tab:significance}}.
+\IfFileExists{../results/tables/main_comparison.tex}{\input{../results/tables/main_comparison.tex}}{\todo{run aggregate\_results.py}}
+
+\subsection{How much does the protocol inflate performance?}\label{sec:leakage}
+Table~\ref{tab:leakage} and Figure~\ref{fig:leakage} \todo{report the gap between grouped and random / augment-then-split
+for each model; note that CDR-VGG19 under the reference protocol approaches the published 99.61\% while it drops to
+XX\% under the grouped protocol}.
+\IfFileExists{../results/tables/leakage.tex}{\input{../results/tables/leakage.tex}}{}
+\begin{figure}[t]\centering
+\IfFileExists{../results/figures/leakage.png}{\includegraphics[width=0.7\linewidth]{leakage.png}}{\todo{figure}}
+\caption{Test macro-F1 of the same architectures under three evaluation protocols.}\label{fig:leakage}
+\end{figure}
+
+\subsection{Ablation study}
+\IfFileExists{../results/tables/ablation.tex}{\input{../results/tables/ablation.tex}}{}
+\todo{discuss: effect of the detection task on classification (a\_no\_det), input representation (gray / CLAHE /
+contour-only vs tri), attention, loss, task weighting, backbone}.
+
+\subsection{Stone localisation}
+\IfFileExists{../results/tables/detection.tex}{\input{../results/tables/detection.tex}}{}
+\todo{compare KidneyMTL detection with the detection-only model (does the classification data help detection?) and
+YOLOv8 as an external reference; show results/runs/kidneymtl\_main/fold0/plots/detections.png}.
+
+\subsection{Statistical significance, calibration and efficiency}
+\IfFileExists{../results/tables/significance.tex}{\input{../results/tables/significance.tex}}{}
+\IfFileExists{../results/tables/efficiency.tex}{\input{../results/tables/efficiency.tex}}{}
+\todo{ECE before/after; reliability diagram; params/GFLOPs vs CDR-VGG19 (146M)}.
+
+\subsection{Explainability}
+\todo{Grad-CAM / Grad-CAM++ figure (results/explain/gradcam\_comparison.png). Pointing game on the Dataset-1 test
+stones: KidneyMTL XX\% vs baselines XX\% (results/explain/pointing\_game.csv), and XX\% for the detection heatmap.}
+
+\subsection{External validation}
+\todo{Stone sensitivity of each classifier on the unseen, coronal Dataset-1 test split
+(results/tables/external\_validation.csv). Interpret the cross-view domain gap honestly.}
+
+% ---------------------------------------------------------------------
+\section{Discussion}
+\todo{(1) Leakage: near-perfect accuracies on CT-KIDNEY mostly reflect duplicate memorisation; recommend grouped
+evaluation and release of folds. (2) What multi-task learning adds: localisation output, effect on classification
+and on Grad-CAM focus. (3) Clinical relevance: stone sensitivity, calibration for triage. (4) Limitations: no
+patient IDs (hash groups are a proxy), 2D slices instead of volumes, JPEG-compressed images without Hounsfield
+units, single-centre public data, axial vs coronal mismatch between the two datasets, no reader study.
+(5) Future work: volumetric models, multi-centre DICOM data, stone composition/size.}
+
+\section{Conclusion}
+\todo{3--4 sentences.}
+
+\paragraph{Data and code availability.} Both datasets are public on Kaggle. The code, configuration files and the
+exact fold assignments are available at \url{https://github.com/utkarshhzz/Kidney_research}.
+
+\bibliographystyle{unsrtnat}
+\bibliography{references}
+\end{document}

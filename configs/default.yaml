@@ -1,0 +1,106 @@
+# =====================================================================
+# KidneyMTL - default experiment configuration
+# Every experiment = this file + a handful of overrides (see
+# scripts/run_experiments.py). Override any key from the CLI with
+#   python scripts/train.py --opts train.epochs=5 model.backbone=resnet50
+# =====================================================================
+
+experiment:
+  name: kidneymtl_main          # results/runs/<name>/fold<k>/
+  seed: 42
+  output_root: results/runs
+  keep_checkpoint: true         # set false for ablations to save disk
+
+data:
+  root: data
+  # Dataset 2: CT-KIDNEY (Normal / Cyst / Tumor / Stone) - classification
+  cls_dir: dataset2/CT-KIDNEY-DATASET-Normal-Cyst-Tumor-Stone/CT-KIDNEY-DATASET-Normal-Cyst-Tumor-Stone
+  classes: [Cyst, Normal, Stone, Tumor]
+  splits_dir: data/splits
+  # grouped        -> near-duplicate-aware StratifiedGroupKFold (proposed, leakage-free)
+  # random         -> plain StratifiedKFold over images (common but leaky)
+  # aug_then_split -> replicates the reference paper (augment first, then split)
+  split_protocol: grouped
+  fold: 0
+  # Dataset 1: Roboflow kidney-stone boxes (YOLO format) - detection
+  det_dir: dataset1
+  cls_img_size: 320
+  det_img_size: 512
+  # Input representation (ablation):
+  #   gray     -> [g, g, g]
+  #   clahe    -> [c, c, c]
+  #   contour  -> [k, k, k]   (reference-paper style contour-detected image)
+  #   tri      -> [g, CLAHE(g), contour(g)]  (proposed)
+  input_mode: tri
+  num_workers: 4
+  debug_max_samples: null       # e.g. 64 -> tiny subsets for smoke tests
+  pin_memory: true
+
+model:
+  name: kidneymtl               # kidneymtl | timm_classifier | cdr_vgg19
+  backbone: efficientnet_b3     # any timm model with features_only support
+  pretrained: true
+  attention: cbam               # cbam | se | none (on the last backbone stage)
+  cls_hidden: 256
+  cls_dropout: 0.3
+  head_activation: silu         # relu | leaky_relu | silu | gelu | mish
+  drop_path_rate: 0.1
+  det_enabled: true             # false -> single-task classification
+  neck_channels: 128
+  det_stride: 4
+
+loss:
+  cls: focal                    # ce | focal
+  focal_gamma: 2.0
+  class_weighting: inverse_sqrt # none | inverse | inverse_sqrt
+  label_smoothing: 0.05
+  # detection (CenterNet-style)
+  det_hm_weight: 1.0
+  det_off_weight: 1.0
+  det_box_weight: 2.0
+  det_box_loss: ciou            # ciou | giou | l1
+  # combine tasks
+  mtl_weighting: uncertainty    # uncertainty | fixed
+  mtl_fixed_det_weight: 0.5
+
+train:
+  epochs: 40
+  batch_size: 32
+  det_batch_size: 16
+  optimizer: adamw
+  lr: 1.0e-3                    # heads / neck
+  backbone_lr: 2.0e-4
+  weight_decay: 1.0e-4
+  warmup_epochs: 2
+  scheduler: cosine
+  min_lr_ratio: 0.01
+  grad_clip: 5.0
+  amp: true
+  ema: true
+  ema_decay: 0.999
+  early_stopping_patience: 8
+  monitor: val_macro_f1         # metric used for model selection
+  balanced_sampler: false
+  det_only: false        # detection-only ablation (monitor must be val_det_map50)
+  log_every: 50
+  max_steps_per_epoch: null     # set small int for smoke tests
+
+augment:
+  hflip: 0.5
+  vflip: 0.0                    # CT axial orientation is meaningful; keep 0
+  rotate_limit: 15
+  scale_limit: 0.15
+  shift_limit: 0.06
+  brightness_contrast: 0.3
+  gamma: 0.2
+  gauss_noise: 0.2
+  blur: 0.1
+  coarse_dropout: 0.2
+
+eval:
+  tta_hflip: true
+  det_score_threshold: 0.3
+  det_topk: 50
+  det_iou_thresholds: [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
+  bootstrap_iters: 2000
+  ece_bins: 15
