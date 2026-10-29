@@ -162,7 +162,9 @@ class Trainer:
         w = class_weights(tr.loc[tr.split == "train", "label"].values, len(self.classes), cfg.loss.class_weighting)
         self.cls_loss = build_cls_loss(cfg, w).to(self.device)
         self.det_loss = CenterNetLoss(cfg) if self.det_on else None
-        self.task_w = TaskWeighting(cfg.loss.mtl_weighting, cfg.loss.mtl_fixed_det_weight).to(self.device)
+        self.task_w = TaskWeighting(cfg.loss.mtl_weighting, cfg.loss.mtl_fixed_det_weight,
+                                    cfg.loss.get("mtl_logvar_min", -1.0),
+                                    cfg.loss.get("mtl_logvar_max", 3.0)).to(self.device)
 
         groups = param_groups(self.model, cfg.train.backbone_lr, cfg.train.lr, cfg.train.weight_decay)
         if self.det_on and cfg.loss.mtl_weighting == "uncertainty":
@@ -274,6 +276,7 @@ class Trainer:
                 nn.utils.clip_grad_norm_(self.model.parameters(), cfg.train.grad_clip)
             self.scaler.step(self.opt)
             self.scaler.update()
+            self.task_w.project()
             self.sched.step()
             if self.ema:
                 self.ema.update(self.model)

@@ -1,6 +1,7 @@
 # KidneyMTL — Leakage-Aware Multi-Task Learning for Kidney Disease Classification and Stone Localisation in CT
 
-Code for the paper (draft in [`paper/main.tex`](paper/main.tex)). One shared backbone learns
+Code for the paper (4-page IEEE version for Overleaf in [`paper/overleaf/main.tex`](paper/overleaf/main.tex),
+long draft in [`paper/main.tex`](paper/main.tex)). One shared backbone learns
 **4-class kidney CT classification** (Normal / Cyst / Tumor / Stone, CT-KIDNEY dataset) and
 **kidney-stone localisation** (bounding boxes, Roboflow kidney-stone dataset) simultaneously, and is evaluated
 with a **leakage-free, near-duplicate-aware cross-validation protocol**.
@@ -67,7 +68,7 @@ scripts/
   download_data.py          Kaggle download + extraction + layout check (Drive zip cache on Colab)
   package_results.py        zip all results (no weights) for download
   import_results.py         merge downloaded result zips into results/ on the local machine
-paper/                      LaTeX draft + bibliography
+paper/                      overleaf/main.tex (4-page IEEE paper) + long draft + bibliography
 data/splits/                exact folds used in the paper (committed for reproducibility)
 notebooks/KidneyMTL_Colab.ipynb   <- the notebook to train everything on Google Colab
 notebooks/ (others)         earlier notebooks (03_data_augmentation is DEPRECATED, see its first cell)
@@ -81,8 +82,8 @@ notebooks/ (others)         earlier notebooks (03_data_augmentation is DEPRECATE
    `Runtime → Change runtime type → GPU`.
 2. Add a **new** Kaggle token as Colab Secrets `KAGGLE_USERNAME` / `KAGGLE_KEY` (key icon in the sidebar), or put
    `kaggle.json` in `MyDrive/Kidney_research/`.
-3. Run sections 1–3 (setup, data, checks), then section 4 with plan `main_fold0_only` first to measure the time
-   per run, then `tier1_3folds` → `tier1` → `all` as your GPU budget allows.
+3. Run sections 1–3 (setup, data, checks), then section 4 with plan `paper_3folds` (the 24 runs behind the
+   4-page paper, ~16 T4-hours; run 4.2 again in each new session). Larger plans: `tier1_3folds` → `tier1` → `all`.
 4. Everything is saved to **Google Drive** (`MyDrive/Kidney_research/results`). After a disconnect, run sections 1, 2
    and 4.2 again: finished runs are skipped. Checkpoints live on Colab's local disk, so Drive only receives results
    plus the final `best.pt` of the main model (all folds) and of the baselines (fold 0).

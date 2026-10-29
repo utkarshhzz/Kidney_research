@@ -23,6 +23,7 @@ augmented_data/
 results/runs/
 results/explain/*.png
 results_*.zip
+results_*/
 results/runs/*/fold*/best.pt
 results/runs/*/fold*/last.pt
 results/runs/yolo_*/train/weights/

@@ -11,6 +11,9 @@ MAIN = "kidneymtl_main"
 _VGG_LR = ["train.lr=1.0e-4", "train.backbone_lr=5.0e-5"]
 _CDR = ["model.name=cdr_vgg19", "model.det_enabled=false", "data.input_mode=contour",
         "data.cls_img_size=224", "loss.cls=ce", "loss.class_weighting=none"] + _VGG_LR
+# augment-then-split has 5x more training rows; cap the steps per epoch at the grouped
+# protocol's (7,457 / 32 = 233) so every protocol gets the same optimisation budget.
+_AUG_BUDGET = ["train.max_steps_per_epoch=233"]
 _STL_BASE = ["model.name=timm_classifier", "data.input_mode=gray", "loss.cls=ce",
              "loss.class_weighting=none", "model.det_enabled=false"]
 
@@ -62,19 +65,19 @@ EXPERIMENTS: dict[str, dict] = {
     # ------------------------------------------------- leakage study
     "l_random_kidneymtl": {"group": "leakage", "opts": ["data.split_protocol=random"],
                            "label": "KidneyMTL, random split"},
-    "l_augsplit_kidneymtl": {"group": "leakage", "opts": ["data.split_protocol=aug_then_split"],
+    "l_augsplit_kidneymtl": {"group": "leakage", "opts": ["data.split_protocol=aug_then_split"] + _AUG_BUDGET,
                              "label": "KidneyMTL, augment-then-split", "folds": [0, 1, 2]},
     "l_random_resnet50": {"group": "leakage",
                           "opts": _STL_BASE + ["model.backbone=resnet50", "data.split_protocol=random"],
                           "label": "ResNet-50, random split"},
     "l_augsplit_resnet50": {"group": "leakage",
-                            "opts": _STL_BASE + ["model.backbone=resnet50", "data.split_protocol=aug_then_split"],
+                            "opts": _STL_BASE + ["model.backbone=resnet50", "data.split_protocol=aug_then_split"] + _AUG_BUDGET,
                             "label": "ResNet-50, augment-then-split", "folds": [0, 1, 2]},
     "l_random_cdr_vgg19": {"group": "leakage",
                            "opts": _CDR + ["data.split_protocol=random"],
                            "label": "CDR-VGG19, random split"},
     "l_augsplit_cdr_vgg19": {"group": "leakage",
-                             "opts": _CDR + ["data.split_protocol=aug_then_split"],
+                             "opts": _CDR + ["data.split_protocol=aug_then_split"] + _AUG_BUDGET,
                              "label": "CDR-VGG19, augment-then-split (ref. protocol)", "folds": [0, 1, 2]},
 }
 
@@ -87,6 +90,11 @@ ABLATION_FOLDS = [0, 1, 2]
 # Run order if compute is limited: tier 1 = minimum publishable set.
 TIER1 = [MAIN, "b_cdr_vgg19", "b_resnet50", "b_efficientnet_b3", "b_convnext_tiny", "a_no_det",
          "a_input_gray", "l_random_kidneymtl", "l_augsplit_cdr_vgg19", "l_random_cdr_vgg19"]
+
+# The 4-page paper (run with --max-folds 3, ~16 h on a T4): proposed model, its single-task
+# ablation, one standard CNN and the reference model, each under all three split protocols.
+PAPER = [MAIN, "a_no_det", "b_resnet50", "b_cdr_vgg19",
+         "l_random_resnet50", "l_augsplit_resnet50", "l_random_cdr_vgg19", "l_augsplit_cdr_vgg19"]
 
 
 def folds_for(name: str) -> list[int]:

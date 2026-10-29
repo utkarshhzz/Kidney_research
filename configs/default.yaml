@@ -63,6 +63,8 @@ loss:
   # combine tasks
   mtl_weighting: uncertainty    # uncertainty | fixed
   mtl_fixed_det_weight: 0.5
+  mtl_logvar_min: -1.0          # bounds on s = log sigma^2 -> task weight exp(-s) in [0.05, 2.72]
+  mtl_logvar_max: 3.0           # (unbounded, w_cls grew to 44 in the first Colab run)
 
 train:
   epochs: 40

@@ -136,13 +136,24 @@ class CenterNetLoss(nn.Module):
 # ----------------------------------------------------------------------------
 class TaskWeighting(nn.Module):
     """``uncertainty``: L = sum_i exp(-s_i) L_i + s_i  (Kendall et al., CVPR 2018),
-    s_i = log sigma_i^2 learned jointly. ``fixed``: L = L_cls + w_det * L_det."""
+    s_i = log sigma_i^2 learned jointly. ``fixed``: L = L_cls + w_det * L_det.
 
-    def __init__(self, mode: str, fixed_det_weight: float = 0.5):
+    The optimum is s_i = log L_i, so a task whose training loss goes to ~0 (focal loss on
+    an easy task) gets an unbounded weight exp(-s_i) - an effective learning-rate blow-up.
+    ``project()`` keeps s_i in [logvar_min, logvar_max] after every optimiser step."""
+
+    def __init__(self, mode: str, fixed_det_weight: float = 0.5,
+                 logvar_min: float = -1.0, logvar_max: float = 3.0):
         super().__init__()
         self.mode = mode
         self.fixed = fixed_det_weight
+        self.bounds = (float(logvar_min), float(logvar_max))
         self.log_vars = nn.Parameter(torch.zeros(2)) if mode == "uncertainty" else None
+
+    @torch.no_grad()
+    def project(self):
+        if self.log_vars is not None:
+            self.log_vars.clamp_(*self.bounds)
 
     def forward(self, l_cls, l_det):
         if self.mode == "uncertainty":
