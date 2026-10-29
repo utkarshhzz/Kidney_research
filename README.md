@@ -83,7 +83,7 @@ notebooks/ (others)         earlier notebooks (03_data_augmentation is DEPRECATE
 2. Add a **new** Kaggle token as Colab Secrets `KAGGLE_USERNAME` / `KAGGLE_KEY` (key icon in the sidebar), or put
    `kaggle.json` in `MyDrive/Kidney_research/`.
 3. Run sections 1–3 (setup, data, checks), then section 4 with plan `paper_3folds` (the 24 runs behind the
-   4-page paper, ~16 T4-hours; run 4.2 again in each new session). Larger plans: `tier1_3folds` → `tier1` → `all`.
+   4-page paper, ~3.5 T4-hours; if Colab disconnects, run 4.2 again). Larger plans: `tier1_3folds` → `tier1` → `all`.
 4. Everything is saved to **Google Drive** (`MyDrive/Kidney_research/results`). After a disconnect, run sections 1, 2
    and 4.2 again: finished runs are skipped. Checkpoints live on Colab's local disk, so Drive only receives results
    plus the final `best.pt` of the main model (all folds) and of the baselines (fold 0).

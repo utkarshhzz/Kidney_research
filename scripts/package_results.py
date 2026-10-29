@@ -40,8 +40,9 @@ def main():
     n_files, n_runs, total = 0, 0, 0
     with zipfile.ZipFile(zpath, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
         for p in sorted(src.rglob("*")):
-            if not p.is_file() or any(part in SKIP_DIRS for part in p.relative_to(src).parts):
-                continue
+            parts = p.relative_to(src).parts
+            if not p.is_file() or any(part in SKIP_DIRS or "_stale_v" in part for part in parts):
+                continue  # archived runs trained with older settings stay on Drive only
             if p.suffix in (".pt", ".pth") and not args.include_checkpoints:
                 continue
             if p.resolve() == zpath.resolve() or p.suffix == ".zip":

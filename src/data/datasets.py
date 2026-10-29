@@ -13,6 +13,7 @@ from ..augmentation import cls_transforms, det_transforms, offline_variant
 from ..config import resolve_path
 from ..preprocessing import build_input, read_gray, to_tensor
 from ..utils import worker_init_fn
+from .cache import gray_cache
 from .splits import detection_items, fold_frame
 
 
@@ -20,19 +21,28 @@ from .splits import detection_items, fold_frame
 # Classification (Dataset 2)
 # ----------------------------------------------------------------------------
 class KidneyClsDataset(Dataset):
-    def __init__(self, df: pd.DataFrame, data_root: Path, transform, input_mode: str):
+    def __init__(self, df: pd.DataFrame, data_root: Path, transform, input_mode: str, cache=None):
+        """``cache``: optional (.npy path, {path: row}) from ``gray_cache`` (pre-resized slices)."""
         self.df = df.reset_index(drop=True)
         self.root = Path(data_root)
         self.transform = transform
         self.input_mode = input_mode
         self.has_aug = "aug_id" in self.df.columns
+        self.cache_file = cache[0] if cache is not None else None
+        self.cache_rows = self.df["path"].map(cache[1]).values if cache is not None else None
+        self._cache = None  # memmap, opened lazily in each worker process
 
     def __len__(self) -> int:
         return len(self.df)
 
     def __getitem__(self, i: int) -> dict:
         row = self.df.iloc[i]
-        gray = read_gray(self.root / row["path"])
+        if self.cache_file is not None:
+            if self._cache is None:
+                self._cache = np.load(self.cache_file, mmap_mode="r")
+            gray = np.array(self._cache[self.cache_rows[i]])
+        else:
+            gray = read_gray(self.root / row["path"])
         if self.has_aug and int(row["aug_id"]) > 0:
             gray = offline_variant(gray, int(row["aug_id"]), seed=i)
         gray = self.transform(image=gray)["image"]
@@ -177,13 +187,20 @@ def build_cls_loaders(cfg) -> dict:
     root = resolve_path(cfg.data.root)
     mode = cfg.data.input_mode
     out = {"frame": df}
+    cache = None
+    if cfg.data.get("cache_dir"):
+        cache = gray_cache(resolve_path(cfg.data.cache_dir), root, df["path"].tolist(), int(cfg.data.cls_img_size))
     for split in ("train", "val", "test"):
         sdf = df[df["split"] == split].reset_index(drop=True)
+        if split == "val" and "aug_id" in sdf.columns:
+            # augment-then-split: select models on the original val images only (5x cheaper);
+            # the test split keeps every variant, as in the reference protocol
+            sdf = sdf[sdf["aug_id"] == 0].reset_index(drop=True)
         if cfg.data.debug_max_samples:
             per_class = max(1, int(cfg.data.debug_max_samples) // len(cfg.data.classes))
             sdf = sdf.groupby("label", group_keys=False).head(per_class).reset_index(drop=True)
         train = split == "train"
-        ds = KidneyClsDataset(sdf, root, cls_transforms(cfg, train), mode)
+        ds = KidneyClsDataset(sdf, root, cls_transforms(cfg, train), mode, cache)
         sampler = None
         if train and cfg.train.balanced_sampler:
             w = 1.0 / np.bincount(sdf["label"].values)[sdf["label"].values]

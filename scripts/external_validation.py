@@ -42,6 +42,8 @@ def main():
     for ck in sorted(runs_root.glob("*/fold*/best.pt")):
         run = ck.parent
         exp = run.parent.name
+        if not run.name[4:].isdigit():  # archived fold<k>_stale_v<n>
+            continue
         if args.experiments and exp not in args.experiments:
             continue
         cfg = load_config(run / "config.yaml")

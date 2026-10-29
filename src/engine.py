@@ -155,6 +155,10 @@ class Trainer:
 
         self.cls = build_cls_loaders(cfg)
         self.model = build_model(cfg).to(self.device)
+        # NHWC lets the T4's tensor cores run AMP convolutions without layout transposes
+        self.mem_format = (torch.channels_last if cfg.train.get("channels_last", True) and self.device.type == "cuda"
+                           else torch.contiguous_format)
+        self.model = self.model.to(memory_format=self.mem_format)
         self.det_on = has_detection(self.model)
         self.det = build_det_loaders(cfg) if self.det_on else None
 
@@ -233,10 +237,13 @@ class Trainer:
         main_loader = self.det["train"] if self.det_only else self.cls["train"]
         pbar = tqdm(itertools.islice(main_loader, self.steps_per_epoch), total=self.steps_per_epoch,
                     desc=f"epoch {epoch}", ncols=100, leave=False)
-        to_dev = lambda batch: {k: (v.to(self.device, non_blocking=True) if torch.is_tensor(v) else v)  # noqa: E731
+        mf = self.mem_format
+        to_dev = lambda batch: {k: (v.to(self.device, non_blocking=True,  # noqa: E731
+                                         memory_format=mf if k == "image" else torch.preserve_format)
+                                    if torch.is_tensor(v) else v)
                                 for k, v in batch.items()}
         for step, b in enumerate(pbar):
-            x = b["image"].to(self.device, non_blocking=True)
+            x = b["image"].to(self.device, non_blocking=True, memory_format=mf)
             self.opt.zero_grad(set_to_none=True)
             zero = torch.zeros((), device=self.device)
             # The two task terms are back-propagated separately: the summed gradient is

@@ -35,7 +35,11 @@ def test_grouped_splits_are_leak_free():
 
 
 def test_detection_roundtrip_is_exact():
-    """Encoding GT boxes into CenterNet targets and decoding them back must give AP = 1."""
+    """Encoding GT boxes into CenterNet targets and decoding them back must give AP ~ 1.
+
+    Not exactly 1: two adjacent stones whose centres fall into the same stride-4 cell
+    collapse into one target (5 of 549 val+test boxes at 384 px, 1 at 512 px; AP ceiling
+    0.990 at both sizes), an inherent limit of CenterNet."""
     import torch
 
     from src.data.datasets import build_det_loaders
@@ -55,7 +59,7 @@ def test_detection_roundtrip_is_exact():
                 off[i, :, ind // W, ind % W] = b["off"][i, k]
         preds += decode_centernet({"hm": torch.log(hm / (1 - hm)), "wh": wh, "off": off}, 4, 50)
         gts += [b["boxes"][i, :int(b["num_boxes"][i])].numpy() for i in range(B)]
-    assert average_precision(preds, gts, 0.75) > 0.999
+    assert average_precision(preds, gts, 0.75) > 0.98
 
 
 def test_ap_simple_cases():

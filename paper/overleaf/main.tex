@@ -5,8 +5,8 @@
 % STATUS: every red "??" (\tbd) and every red sentence (\finding{...}) depends on
 % training results that do not exist yet (plan "paper_3folds" in the Colab
 % notebook). All black numbers are final: they come from the data audit
-% (data/splits/leakage_report.json), the dataset files and the T4 efficiency
-% benchmark. Before submission: no red text may remain, and the reference
+% (data/splits/leakage_report.json), the dataset files and the parameter counts.
+% GFLOPs/latency are re-measured at the v2 input sizes by notebook cell 5.2. Before submission: no red text may remain, and the reference
 % list must be checked against the publisher pages.
 % =====================================================================
 \documentclass[conference]{IEEEtran}
@@ -195,9 +195,9 @@ weight $e^{-s_c}$ rose from 1 to 44 within 20 epochs while its training loss fel
 validation accuracy oscillated between 85\% and 91\%. We therefore project $s_i$ onto $[-1,3]$ after every
 optimiser step, which limits task weights to $[0.05,\,2.72]$.
 
-\textbf{Partially labelled training.} Every step combines one CT-KIDNEY batch (32 slices, $320^2$,
-classification loss only) with one stone batch (16 images, $512^2$ letterboxed, localisation loss only). No
-image needs both kinds of label.
+\textbf{Partially labelled training.} Every step combines one CT-KIDNEY batch (32 slices, $256^2$,
+classification loss only) with one stone batch (8 images letterboxed to $384^2$, i.e.\ their native
+$320{\times}391$ resolution, localisation loss only). No image needs both kinds of label.
 
 % ---------------------------------------------------------------------
 \section{Experimental Setup}
@@ -205,9 +205,10 @@ image needs both kinds of label.
 ablation), (b) ResNet-50~\cite{he2016resnet} fine-tuned with cross-entropy on grey-level input, the standard
 practice, and (c) CDR-VGG19~\cite{devi2025cdr}, re-implemented from its description (VGG-19~\cite{simonyan2015vgg},
 two 4096-unit layers, a 4096-320-320-4096 normalised residual block and $224^2$ contour input).
-\textbf{Training.} AdamW (backbone learning rate $2{\times}10^{-4}$, heads $10^{-3}$), 2-epoch warm-up and cosine
-decay, at most 40 epochs with early stopping on validation macro-F1 (patience 8), mixed precision, an
-exponential moving average of the weights and horizontal-flip test-time augmentation. Online augmentation:
+\textbf{Training.} AdamW (backbone learning rate $2{\times}10^{-4}$, heads $10^{-3}$), 1-epoch warm-up and cosine
+decay, at most 12 epochs with early stopping on validation macro-F1 (patience 4), mixed precision, an
+exponential moving average of the weights and horizontal-flip test-time augmentation. For augment-then-split,
+models are selected on the original validation images and tested on all variants. Online augmentation:
 flips, affine transforms, brightness/contrast, gamma, noise, blur and coarse dropout. All models share the
 augmentation, schedule and folds. Experiments ran on an NVIDIA T4 (16\,GB) with PyTorch~2 and timm~1.0.15.
 For budget reasons we report the first three of the five folds (7,457/2,485/2,504 train/val./test slices in fold 0).
@@ -257,18 +258,18 @@ $p<0.05$ against KidneyMTL after Holm correction.}
 \toprule
 Model & Input & Params (M) & GFLOPs & Latency (ms) & Accuracy & Macro-F1 & Macro AUC & Stone sens. & ECE $\downarrow$ \\
 \midrule
-ResNet-50~\cite{he2016resnet} & $320^2$ gray & 23.5 & 16.68 & 10.7 & \tbd & \tbd & \tbd & \tbd & \tbd \\
-CDR-VGG19~\cite{devi2025cdr} (re-impl.) & $224^2$ contour & 142.3 & 39.26 & 21.6 & \tbd & \tbd & \tbd & \tbd & \tbd \\
-KidneyMTL w/o localisation & $320^2$ tri & 10.2 & 3.80 & 13.6 & \tbd & \tbd & \tbd & \tbd & \tbd \\
-\textbf{KidneyMTL (ours)} & $320^2$ tri & 10.2$^\dagger$ & 3.80 & 13.5 & \tbd & \tbd & \tbd & \tbd & \tbd \\
+ResNet-50~\cite{he2016resnet} & $256^2$ gray & 23.5 & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd \\
+CDR-VGG19~\cite{devi2025cdr} (re-impl.) & $224^2$ contour & 142.3 & 39.26 & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd \\
+KidneyMTL w/o localisation & $256^2$ tri & 10.2 & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd \\
+\textbf{KidneyMTL (ours)} & $256^2$ tri & 10.2$^\dagger$ & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd \\
 \bottomrule
-\multicolumn{10}{l}{\footnotesize $^\dagger$11.2M including the localisation branch (30.8 GFLOPs, 22.1\,ms at $512^2$), which is not needed for classification.}
+\multicolumn{10}{l}{\footnotesize $^\dagger$11.2M including the localisation branch (\tbd{} GFLOPs, \tbd\,ms at $384^2$), which is not needed for classification.}
 \end{tabular}
 \end{table*}
 
 Table~\ref{tab:main} compares the models under the grouped protocol.
 \finding{KidneyMTL achieves the highest macro-F1 (\tbd\%, 95\% CI [\tbd, \tbd]) with 14$\times$ fewer parameters
-and 10$\times$ fewer FLOPs than CDR-VGG19.} \finding{Removing the localisation task changes macro-F1 by \tbd{}
+and \tbd$\times$ fewer FLOPs than CDR-VGG19.} \finding{Removing the localisation task changes macro-F1 by \tbd{}
 points and stone sensitivity by \tbd{} points}, which isolates the effect of multi-task training on
 classification. \finding{The most frequent error of all models is tumour slices predicted as normal}, reflecting
 the low contrast of small renal masses on JPEG-compressed slices. \finding{KidneyMTL is also the best calibrated

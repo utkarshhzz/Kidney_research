@@ -54,8 +54,8 @@ def label(name):
 def collect(runs_root: Path) -> pd.DataFrame:
     rows = []
     for s in sorted(runs_root.glob("*/fold*/summary.json")):
-        if not (s.parent / "DONE").exists():
-            continue
+        if not (s.parent / "DONE").exists() or not s.parent.name[4:].isdigit():
+            continue  # skips archived fold<k>_stale_v<n> runs
         d = load_json(s)
         d["experiment"] = s.parent.parent.name
         d["run_dir"] = str(s.parent)

@@ -91,7 +91,7 @@ ABLATION_FOLDS = [0, 1, 2]
 TIER1 = [MAIN, "b_cdr_vgg19", "b_resnet50", "b_efficientnet_b3", "b_convnext_tiny", "a_no_det",
          "a_input_gray", "l_random_kidneymtl", "l_augsplit_cdr_vgg19", "l_random_cdr_vgg19"]
 
-# The 4-page paper (run with --max-folds 3, ~16 h on a T4): proposed model, its single-task
+# The 4-page paper (run with --max-folds 3, ~3.5 h on a T4): proposed model, its single-task
 # ablation, one standard CNN and the reference model, each under all three split protocols.
 PAPER = [MAIN, "a_no_det", "b_resnet50", "b_cdr_vgg19",
          "l_random_resnet50", "l_augsplit_resnet50", "l_random_cdr_vgg19", "l_augsplit_cdr_vgg19"]
@@ -105,10 +105,10 @@ def folds_for(name: str) -> list[int]:
 def experiment_opts(name: str) -> list[str]:
     opts = list(EXPERIMENTS[name]["opts"]) + [f"experiment.name={name}"]
     # Checkpoint policy (disk/Drive budget): all folds of the main model (explainability,
-    # re-evaluation), fold 0 of baselines (Grad-CAM comparison), none for the rest.
+    # re-evaluation), fold 0 of baselines/ablations (Grad-CAM comparison), none for the rest.
     # Per-image predictions and all metrics are always saved, so no table needs a checkpoint.
     group = EXPERIMENTS[name]["group"]
-    keep = {"main": "true", "baselines": "fold0", "detection": "fold0"}.get(group, "false")
+    keep = {"main": "true", "baselines": "fold0", "ablations": "fold0", "detection": "fold0"}.get(group, "false")
     opts.append(f"experiment.keep_checkpoint={keep}")
     return opts
 

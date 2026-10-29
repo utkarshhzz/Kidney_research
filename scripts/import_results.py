@@ -28,7 +28,7 @@ def main():
                 raise SystemExit(f"{z}: unexpected paths in archive (not produced by package_results.py): {bad[:3]}")
             zf.extractall(ROOT)
             print(f"{z}: {len(members)} files -> {ROOT / 'results'}")
-    runs = sorted((ROOT / "results" / "runs").glob("*/fold*/DONE"))
+    runs = [r for r in sorted((ROOT / "results" / "runs").glob("*/fold*/DONE")) if r.parent.name[4:].isdigit()]
     exps = sorted({r.parent.parent.name for r in runs})
     print(f"\n{len(runs)} finished runs across {len(exps)} experiments:")
     for e in exps:
