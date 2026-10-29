@@ -8,7 +8,7 @@
 # ============================================================
 
 # --- Deep learning ---
-torch>=2.3,<2.9          # torch.amp.GradScaler("cuda") API
+torch>=2.3               # torch.amp.GradScaler("cuda") API
 torchvision>=0.18
 timm==1.0.15
 

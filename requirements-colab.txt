@@ -1,0 +1,5 @@
+# Google Colab: torch, torchvision, numpy, pandas, scikit-learn, scipy, matplotlib,
+# opencv, pyyaml and tqdm are pre-installed - do NOT reinstall torch there.
+# The Colab notebook installs only what is missing / version-pinned:
+timm==1.0.15
+albumentations==2.0.8

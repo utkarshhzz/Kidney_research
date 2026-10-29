@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import traceback
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -38,10 +39,16 @@ def main():
     seed_everything(cfg.experiment.seed + cfg.data.fold)
 
     run_dir = resolve_path(cfg.experiment.output_root) / cfg.experiment.name / f"fold{cfg.data.fold}"
-    if (run_dir / "DONE").exists() and not args.resume:
+    if (run_dir / "DONE").exists():
         print(f"{run_dir} already finished (delete the DONE file to re-run)")
         return
-    Trainer(cfg, run_dir, resume=args.resume).fit()
+    try:
+        Trainer(cfg, run_dir, resume=args.resume).fit()
+    except Exception:
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "error.log").write_text(traceback.format_exc(), encoding="utf-8")
+        raise
+    (run_dir / "error.log").unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

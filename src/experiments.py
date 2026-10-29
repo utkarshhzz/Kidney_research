@@ -96,8 +96,12 @@ def folds_for(name: str) -> list[int]:
 
 def experiment_opts(name: str) -> list[str]:
     opts = list(EXPERIMENTS[name]["opts"]) + [f"experiment.name={name}"]
-    if EXPERIMENTS[name]["group"] == "ablations":
-        opts.append("experiment.keep_checkpoint=false")
+    # Checkpoint policy (disk/Drive budget): all folds of the main model (explainability,
+    # re-evaluation), fold 0 of baselines (Grad-CAM comparison), none for the rest.
+    # Per-image predictions and all metrics are always saved, so no table needs a checkpoint.
+    group = EXPERIMENTS[name]["group"]
+    keep = {"main": "true", "baselines": "fold0", "detection": "fold0"}.get(group, "false")
+    opts.append(f"experiment.keep_checkpoint={keep}")
     return opts
 
 

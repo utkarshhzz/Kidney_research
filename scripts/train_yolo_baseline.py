@@ -29,6 +29,7 @@ def main():
     ap.add_argument("--epochs", type=int, default=100)
     ap.add_argument("--imgsz", type=int, default=512)
     ap.add_argument("--batch", type=int, default=16)
+    ap.add_argument("--output-root", default=None, help="default: experiment.output_root (results/runs)")
     args = ap.parse_args()
     try:
         from ultralytics import YOLO
@@ -38,7 +39,7 @@ def main():
     cfg = load_config()
     det_root = resolve_path(cfg.data.root) / cfg.data.det_dir
     name = f"yolo_{Path(args.model).stem}"
-    run_dir = resolve_path(cfg.experiment.output_root) / name
+    run_dir = resolve_path(args.output_root or cfg.experiment.output_root) / name
     run_dir.mkdir(parents=True, exist_ok=True)
     data_yaml = run_dir / "data.yaml"
     data_yaml.write_text(yaml.safe_dump({

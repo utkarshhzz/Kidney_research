@@ -19,6 +19,10 @@ augmented_data/
 !data/splits/
 
 # --- training outputs ---
+# per-run folders are large (per-image predictions); tables/figures/RESULTS.md may be committed
+results/runs/
+results/explain/*.png
+results_*.zip
 results/runs/*/fold*/best.pt
 results/runs/*/fold*/last.pt
 results/runs/yolo_*/train/weights/

@@ -166,6 +166,19 @@ def main():
                  "tab:detection", bold_best={"mAP@0.5": "max", "mAP@0.5:0.95": "max"})
         md += ["## Stone detection\n", to_markdown(t), ""]
 
+    # ------------------------------------------------- external validation
+    if "ext_stone_sensitivity" in df:
+        names = [n for n in present if df.loc[df.experiment == n, "ext_stone_sensitivity"].notna().any()]
+        t = summary_table(df, names, [("ext_stone_sensitivity", "Stone sensitivity"),
+                                      ("ext_stone_in_top2", "Stone in top-2"), ("ext_mean_p_stone", "Mean P(stone)")])
+        if not t.empty:
+            t.to_csv(tables / "external_validation.csv", index=False)
+            to_latex(t, tables / "external_validation.tex",
+                     "External cross-dataset, cross-view test: classifiers trained on axial CT-KIDNEY applied to "
+                     "the unseen coronal Dataset-1 test split (all images contain stones; \\%).",
+                     "tab:external", bold_best={"Stone sensitivity": "max"})
+            md += ["## External validation (Dataset-1 test, coronal)\n", to_markdown(t), ""]
+
     # ----------------------------------- pooled OOF + bootstrap + McNemar
     pooled_rows, sig_rows = [], []
     main_pred = pooled_predictions(df, MAIN) if MAIN in present else None

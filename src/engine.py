@@ -4,9 +4,11 @@ from __future__ import annotations
 import copy
 import itertools
 import math
+import shutil
 import time
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
@@ -140,6 +142,11 @@ class Trainer:
         self.run_dir = Path(run_dir)
         self.run_dir.mkdir(parents=True, exist_ok=True)
         (self.run_dir / "plots").mkdir(exist_ok=True)
+        # Checkpoints are rewritten every epoch; on Colab keep them on fast local disk
+        # (experiment.work_dir) instead of Google Drive, and copy only the final best.pt.
+        wd = cfg.experiment.work_dir
+        self.ckpt_dir = (Path(wd) / cfg.experiment.name / f"fold{cfg.data.fold}") if wd else self.run_dir
+        self.ckpt_dir.mkdir(parents=True, exist_ok=True)
         save_config(cfg, self.run_dir / "config.yaml")
         self.log = get_logger(f"train.{cfg.experiment.name}.{cfg.data.fold}", self.run_dir / "train.log")
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -179,7 +186,7 @@ class Trainer:
         if self.det_only and cfg.train.monitor != "val_det_map50":
             raise ValueError("det_only runs must use train.monitor=val_det_map50")
         self.start_epoch, self.best, self.bad_epochs, self.history = 0, -float("inf"), 0, []
-        if resume and (self.run_dir / "last.pt").exists():
+        if resume and (self.ckpt_dir / "last.pt").exists():
             self._load_last()
 
         n_params = sum(p.numel() for p in self.model.parameters())
@@ -199,10 +206,10 @@ class Trainer:
             "opt": self.opt.state_dict(), "sched": self.sched.state_dict(), "scaler": self.scaler.state_dict(),
             "task_w": self.task_w.state_dict(), "best": self.best, "bad_epochs": self.bad_epochs,
             "history": self.history,
-        }, self.run_dir / "last.pt")
+        }, self.ckpt_dir / "last.pt")
 
     def _load_last(self):
-        ck = torch.load(self.run_dir / "last.pt", map_location=self.device, weights_only=False)
+        ck = torch.load(self.ckpt_dir / "last.pt", map_location=self.device, weights_only=False)
         self.model.load_state_dict(ck["model"])
         if self.ema and ck["ema"] is not None:
             self.ema.module.load_state_dict(ck["ema"])
@@ -224,33 +231,44 @@ class Trainer:
         main_loader = self.det["train"] if self.det_only else self.cls["train"]
         pbar = tqdm(itertools.islice(main_loader, self.steps_per_epoch), total=self.steps_per_epoch,
                     desc=f"epoch {epoch}", ncols=100, leave=False)
+        to_dev = lambda batch: {k: (v.to(self.device, non_blocking=True) if torch.is_tensor(v) else v)  # noqa: E731
+                                for k, v in batch.items()}
         for step, b in enumerate(pbar):
             x = b["image"].to(self.device, non_blocking=True)
-            with autocast(self.device, self.amp):
-                if self.det_only:
-                    db = {k: (v.to(self.device, non_blocking=True) if torch.is_tensor(v) else v)
-                          for k, v in b.items()}
-                    l_det, _ = self.det_loss(self.model(x, "det"), db)
-                    l_cls = torch.zeros((), device=self.device)
-                    loss = l_det
-                elif self.det_on:
-                    y = b["label"].to(self.device, non_blocking=True)
+            self.opt.zero_grad(set_to_none=True)
+            zero = torch.zeros((), device=self.device)
+            # The two task terms are back-propagated separately: the summed gradient is
+            # identical, but only one task's activation graph is alive at a time, which
+            # roughly halves peak GPU memory (needed to fit a 16 GB Colab T4).
+            if self.det_only:
+                with autocast(self.device, self.amp):
+                    l_det, _ = self.det_loss(self.model(x, "det"), to_dev(b))
+                l_cls, loss = zero, l_det
+                parts = [l_det]
+            else:
+                y = b["label"].to(self.device, non_blocking=True)
+                with autocast(self.device, self.amp):
                     l_cls = self.cls_loss(self.model(x, "cls")["logits"], y)
-                    db = {k: (v.to(self.device, non_blocking=True) if torch.is_tensor(v) else v)
-                          for k, v in next(det_iter).items()}
-                    l_det, _ = self.det_loss(self.model(db["image"], "det"), db)
-                    loss = self.task_w(l_cls, l_det)
-                else:
-                    y = b["label"].to(self.device, non_blocking=True)
-                    l_cls = self.cls_loss(self.model(x, "cls")["logits"], y)
-                    l_det = torch.zeros((), device=self.device)
-                    loss = l_cls
+                    term_cls = self.task_w.term(0, l_cls) if self.det_on else l_cls
+                parts = [term_cls]
+                l_det = zero
+                if torch.isfinite(term_cls):
+                    self.scaler.scale(term_cls).backward()
+                if self.det_on:
+                    db = to_dev(next(det_iter))
+                    with autocast(self.device, self.amp):
+                        l_det, _ = self.det_loss(self.model(db["image"], "det"), db)
+                        term_det = self.task_w.term(1, l_det)
+                    parts.append(term_det)
+                loss = sum(p.detach() for p in parts)
             if not torch.isfinite(loss):
                 self.log.info(f"non-finite loss at step {step}, skipping batch")
                 self.opt.zero_grad(set_to_none=True)
                 continue
-            self.opt.zero_grad(set_to_none=True)
-            self.scaler.scale(loss).backward()
+            if self.det_only:
+                self.scaler.scale(l_det).backward()
+            elif self.det_on:
+                self.scaler.scale(term_det).backward()
             if cfg.train.grad_clip:
                 self.scaler.unscale_(self.opt)
                 nn.utils.clip_grad_norm_(self.model.parameters(), cfg.train.grad_clip)
@@ -303,7 +321,7 @@ class Trainer:
             if improved:
                 self.best, self.bad_epochs = score, 0
                 torch.save({"model": self._eval_model().state_dict(), "epoch": epoch, "score": score,
-                            "config": cfg.to_dict()}, self.run_dir / "best.pt")
+                            "config": cfg.to_dict()}, self.ckpt_dir / "best.pt")
             else:
                 self.bad_epochs += 1
             msg = " ".join(f"{k}={v:.4f}" for k, v in row.items() if isinstance(v, float) and k != "lr")
@@ -321,16 +339,20 @@ class Trainer:
         results["train_time_s"] = train_time
         results["epochs_run"] = len(self.history)
         save_json(results["summary"], self.run_dir / "summary.json")
-        if (self.run_dir / "last.pt").exists():
-            (self.run_dir / "last.pt").unlink()
-        if not cfg.experiment.keep_checkpoint and (self.run_dir / "best.pt").exists():
-            (self.run_dir / "best.pt").unlink()
+        (self.ckpt_dir / "last.pt").unlink(missing_ok=True)
+        keep = cfg.experiment.keep_checkpoint
+        keep = (cfg.data.fold == 0) if keep == "fold0" else bool(keep)
+        best = self.ckpt_dir / "best.pt"
+        if keep and self.ckpt_dir != self.run_dir:
+            shutil.copy2(best, self.run_dir / "best.pt")
+        if (not keep or self.ckpt_dir != self.run_dir) and best.exists():
+            best.unlink()
         (self.run_dir / "DONE").write_text("ok")
         return results
 
     # ---------------------------------------------------------------- test
     def test(self) -> dict:
-        model, epoch = load_run_model(self.run_dir, self.device)
+        model, epoch = load_run_model(self.ckpt_dir, self.device)
         return evaluate_run(self.cfg, model, self.cls, self.det, self.run_dir, self.device, self.amp,
                             best_epoch=epoch, log=self.log)
 
@@ -390,4 +412,36 @@ def evaluate_run(cfg, model, cls_loaders, det_loaders, run_dir: Path, device, am
                 summary.update({f"det_{k}": v for k, v in dm.items() if isinstance(v, float)})
                 if log:
                     log.info(f"TEST det mAP50={dm['mAP@0.5']:.4f} mAP50-95={dm['mAP@0.5:0.95']:.4f}")
+    if not cfg.train.det_only and "Stone" in classes:
+        ext = external_validation(cfg, model, device, amp)
+        save_json(ext, run_dir / "external_metrics.json")
+        summary.update({f"ext_{k}": v for k, v in ext.items() if isinstance(v, float)})
+        if log:
+            log.info(f"EXTERNAL (Dataset-1 test, coronal) stone sensitivity={ext['stone_sensitivity']:.4f}")
     return {"summary": summary}
+
+
+def external_validation(cfg, model, device, amp: bool) -> dict:
+    """Classifier on the unseen Dataset-1 test split: every image contains a stone,
+    but the view (coronal) and source differ from training (axial CT-KIDNEY)."""
+    from torch.utils.data import DataLoader
+
+    from .augmentation import cls_transforms
+    from .config import resolve_path
+    from .data.datasets import KidneyClsDataset
+    from .data.splits import detection_items
+
+    classes = list(cfg.data.classes)
+    stone = classes.index("Stone")
+    root = resolve_path(cfg.data.root)
+    items = detection_items(root, cfg.data.det_dir, "test")
+    df = pd.DataFrame({"path": [p.relative_to(root).as_posix() for p, _ in items], "label": stone})
+    ds = KidneyClsDataset(df, root, cls_transforms(cfg, False), cfg.data.input_mode)
+    loader = DataLoader(ds, batch_size=32, num_workers=min(2, cfg.data.num_workers))
+    probs, _, _ = predict_cls(model, loader, device, amp, tta_hflip=cfg.eval.tta_hflip)
+    pred = probs.argmax(1)
+    top2 = np.argsort(-probs, 1)[:, :2]
+    return {"n": int(len(df)), "stone_sensitivity": float((pred == stone).mean()),
+            "stone_in_top2": float((top2 == stone).any(1).mean()),
+            "mean_p_stone": float(probs[:, stone].mean()),
+            **{f"pred_frac_{c}": float((pred == i).mean()) for i, c in enumerate(classes)}}

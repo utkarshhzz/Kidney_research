@@ -150,6 +150,12 @@ class TaskWeighting(nn.Module):
             return torch.exp(-s[0]) * l_cls + s[0] + torch.exp(-s[1]) * l_det + s[1]
         return l_cls + self.fixed * l_det
 
+    def term(self, i: int, loss):
+        """Weighted contribution of task i (0 = cls, 1 = det); sum of terms == forward()."""
+        if self.mode == "uncertainty":
+            return torch.exp(-self.log_vars[i]) * loss + self.log_vars[i]
+        return loss if i == 0 else self.fixed * loss
+
     def weights(self) -> dict:
         if self.mode == "uncertainty":
             w = torch.exp(-self.log_vars.detach()).cpu().tolist()

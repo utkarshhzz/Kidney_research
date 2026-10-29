@@ -9,7 +9,8 @@ experiment:
   name: kidneymtl_main          # results/runs/<name>/fold<k>/
   seed: 42
   output_root: results/runs
-  keep_checkpoint: true         # set false for ablations to save disk
+  keep_checkpoint: true         # true | false | fold0 (keep best.pt only for fold 0)
+  work_dir: null                # local scratch for last.pt/best.pt during training (Colab: /content/work)
 
 data:
   root: data

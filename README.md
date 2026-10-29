@@ -64,12 +64,42 @@ scripts/
   benchmark_efficiency.py   params / FLOPs / latency
   evaluate.py               re-evaluate a finished run (e.g. without TTA)
   train_yolo_baseline.py    optional YOLOv8 detection reference
+  download_data.py          Kaggle download + extraction + layout check (Drive zip cache on Colab)
+  package_results.py        zip all results (no weights) for download
+  import_results.py         merge downloaded result zips into results/ on the local machine
 paper/                      LaTeX draft + bibliography
 data/splits/                exact folds used in the paper (committed for reproducibility)
-notebooks/                  earlier Colab notebooks (03_data_augmentation is DEPRECATED, see its first cell)
+notebooks/KidneyMTL_Colab.ipynb   <- the notebook to train everything on Google Colab
+notebooks/ (others)         earlier notebooks (03_data_augmentation is DEPRECATED, see its first cell)
 ```
 
-## 1. Setup (training machine)
+## Training on Google Colab (recommended)
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/utkarshhzz/Kidney_research/blob/main/notebooks/KidneyMTL_Colab.ipynb)
+
+1. Open [`notebooks/KidneyMTL_Colab.ipynb`](notebooks/KidneyMTL_Colab.ipynb) with the badge above, then choose
+   `Runtime → Change runtime type → GPU`.
+2. Add a **new** Kaggle token as Colab Secrets `KAGGLE_USERNAME` / `KAGGLE_KEY` (key icon in the sidebar), or put
+   `kaggle.json` in `MyDrive/Kidney_research/`.
+3. Run sections 1–3 (setup, data, checks), then section 4 with plan `main_fold0_only` first to measure the time
+   per run, then `tier1_3folds` → `tier1` → `all` as your GPU budget allows.
+4. Everything is saved to **Google Drive** (`MyDrive/Kidney_research/results`). After a disconnect, run sections 1, 2
+   and 4.2 again: finished runs are skipped. Checkpoints live on Colab's local disk, so Drive only receives results
+   plus the final `best.pt` of the main model (all folds) and of the baselines (fold 0).
+5. Section 5 builds all tables, figures, Grad-CAM and the efficiency table. Section 6 zips everything (without
+   model weights) and **downloads it automatically** (a copy also goes to `MyDrive/Kidney_research/downloads/`).
+6. On your own computer, inside this project folder (no GPU or PyTorch needed):
+   ```bash
+   python scripts/import_results.py results_YYYYMMDD_HHMM.zip   # merges into results/
+   python scripts/aggregate_results.py                          # rebuilds results/RESULTS.md + tables
+   ```
+
+Colab-specific engineering in the code: the classification and detection losses are back-propagated separately
+(identical gradients, about half the peak GPU memory, so the multi-task model fits a 16 GB T4). Runs that crash with
+CUDA out-of-memory are retried automatically with half the batch size. `--hours` stops starting new runs before the
+session limit. Every run also writes its external-validation metrics, so no table needs checkpoints.
+
+## 1. Setup (alternative: your own GPU machine)
 
 ```bash
 git clone https://github.com/utkarshhzz/Kidney_research.git
@@ -106,7 +136,9 @@ python scripts/run_experiments.py --tier1    # minimum publishable set (10 exper
 python scripts/run_experiments.py            # everything else (finished runs are skipped)
 ```
 
-* Runs are **resumable**. If the laptop restarts, run the same command again; interrupted runs continue from `last.pt`.
+* Runs are **resumable**. If the machine restarts, run the same command again; finished runs are skipped and
+  interrupted runs continue from `last.pt`. On Colab, an interrupted run restarts because its `last.pt` was on local disk.
+* A crashed run writes its traceback to `results/runs/<experiment>/fold<k>/error.log`; the queue continues.
 * Run single things with `python scripts/train.py --name kidneymtl_main --fold 0`, or with
   `scripts/run_experiments.py --only b_resnet50 --folds 0 1`.
 * Out of GPU memory → append `--opts train.batch_size=16 train.det_batch_size=8`. Slow data loading → `data.num_workers=8`.
@@ -157,7 +189,8 @@ python scripts/aggregate_results.py                       # re-run so YOLO joins
 `config.yaml` (exact config) · `train.log` · `history.csv` (per-epoch losses/metrics/LR/task weights) ·
 `best.pt` (EMA weights, best validation macro-F1) · `{val,test}_metrics.json` (all metrics, per-class, confusion matrix,
 stone-vs-rest) · `{val,test}_predictions.csv` (per-image probabilities, used for pooled stats) ·
-`det_{val,test}_metrics.json` · `summary.json` · `plots/` · `DONE`.
+`det_{val,test}_metrics.json` · `external_metrics.json` (unseen Dataset-1 test) · `summary.json` · `plots/` · `DONE`
+(or `error.log` if the run crashed). `best.pt` is kept for all folds of the main model and for fold 0 of the baselines.
 
 ## 5. Methodological checklist (what reviewers will look for)
 
